@@ -56,7 +56,7 @@ class BasicDataset(Dataset):
 
         self.ids = [splitext(file)[0] for file in listdir(images_dir) if isfile(join(images_dir, file)) and not file.startswith('.')]
         #only take the first 1000 images
-        self.ids = self.ids[:1000]
+        #self.ids = self.ids[:1000]
         if not self.ids:
             raise RuntimeError(f'No input file found in {images_dir}, make sure you put your images there')
 
