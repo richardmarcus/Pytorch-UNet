@@ -19,8 +19,8 @@ from unet import UNet
 from utils.data_loading import BasicDataset, CarvanaDataset
 from utils.dice_score import dice_loss
 
-dir_img = Path('./data/imgs/')
-dir_mask = Path('./data/masks/')
+dir_img = Path('/media/oq55olys/chonk/Datasets/kittilike/DurLAR/DurLAR_20210716/ambient/data/')
+dir_mask = Path('/media/oq55olys/chonk/Datasets/kittilike/DurLAR/DurLAR_20210716/reflec/data/')
 dir_checkpoint = Path('./checkpoints/')
 
 
@@ -39,10 +39,13 @@ def train_model(
         gradient_clipping: float = 1.0,
 ):
     # 1. Create dataset
-    try:
-        dataset = CarvanaDataset(dir_img, dir_mask, img_scale)
-    except (AssertionError, RuntimeError, IndexError):
-        dataset = BasicDataset(dir_img, dir_mask, img_scale)
+    #try:
+    #    dataset = CarvanaDataset(dir_img, dir_mask, img_scale)
+    #except (AssertionError, RuntimeError, IndexError):
+    #    dataset = BasicDataset(dir_img, dir_mask, img_scale)
+
+    dataset = BasicDataset(dir_img, dir_mask, img_scale)
+
 
     # 2. Split into train / validation partitions
     n_val = int(len(dataset) * val_percent)
@@ -193,7 +196,7 @@ if __name__ == '__main__':
     # Change here to adapt to your data
     # n_channels=3 for RGB images
     # n_classes is the number of probabilities you want to get per pixel
-    model = UNet(n_channels=3, n_classes=args.classes, bilinear=args.bilinear)
+    model = UNet(n_channels=1, n_classes=args.classes, bilinear=args.bilinear)
     model = model.to(memory_format=torch.channels_last)
 
     logging.info(f'Network:\n'

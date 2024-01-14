@@ -20,12 +20,23 @@ def load_image(filename):
     elif ext in ['.pt', '.pth']:
         return Image.fromarray(torch.load(filename).numpy())
     else:
-        return Image.open(filename)
+        image = Image.open(filename)
+        #convert from 16 bit to 8 bit
+        #divide by 256
+        image = np.array(image)
+        image = image.astype(np.float32)
+        image = image / 256
+        image = image.astype(np.uint8)
+        
+        return image
 
 
 def unique_mask_values(idx, mask_dir, mask_suffix):
     mask_file = list(mask_dir.glob(idx + mask_suffix + '.*'))[0]
     mask = np.asarray(load_image(mask_file))
+    #set mask to 1 if it is not 0
+    mask[mask != 0] = 1
+
     if mask.ndim == 2:
         return np.unique(mask)
     elif mask.ndim == 3:
@@ -44,6 +55,8 @@ class BasicDataset(Dataset):
         self.mask_suffix = mask_suffix
 
         self.ids = [splitext(file)[0] for file in listdir(images_dir) if isfile(join(images_dir, file)) and not file.startswith('.')]
+        #only take the first 1000 images
+        self.ids = self.ids[:1000]
         if not self.ids:
             raise RuntimeError(f'No input file found in {images_dir}, make sure you put your images there')
 
@@ -61,15 +74,35 @@ class BasicDataset(Dataset):
     def __len__(self):
         return len(self.ids)
 
+    def random_crop_image(img, newW, newH, left):
+        top = 0
+        bottom = top + newH
+        right = left + newW
+        return img[top:bottom, left:right]
+        
+
     @staticmethod
-    def preprocess(mask_values, pil_img, scale, is_mask):
-        w, h = pil_img.size
-        newW, newH = int(scale * w), int(scale * h)
-        assert newW > 0 and newH > 0, 'Scale is too small, resized images would have no pixel'
-        pil_img = pil_img.resize((newW, newH), resample=Image.NEAREST if is_mask else Image.BICUBIC)
+    def preprocess(mask_values, pil_img, scale, is_mask, left):
+        #w, h = pil_img.size
+
+        newH, newW = 128, 256
+
+        img = np.asarray(pil_img)
+        img = BasicDataset.random_crop_image(img, newW, newH, left)
+        if is_mask:
+            img[img != 0] = 1
+        pil_img = Image.fromarray(img)
+        
+
+
+        #newW, newH = int(scale * w), int(scale * h)
+        #assert newW > 0 and newH > 0, 'Scale is too small, resized images would have no pixel'
+        #pil_img = pil_img.resize((newW, newH), resample=Image.NEAREST if is_mask else Image.BICUBIC)
         img = np.asarray(pil_img)
 
         if is_mask:
+            #set mask to 1 if it is not 0
+
             mask = np.zeros((newH, newW), dtype=np.int64)
             for i, v in enumerate(mask_values):
                 if img.ndim == 2:
@@ -103,8 +136,9 @@ class BasicDataset(Dataset):
         assert img.size == mask.size, \
             f'Image and mask {name} should be the same size, but are {img.size} and {mask.size}'
 
-        img = self.preprocess(self.mask_values, img, self.scale, is_mask=False)
-        mask = self.preprocess(self.mask_values, mask, self.scale, is_mask=True)
+        left = np.random.randint(0, img.shape[1] - 256)
+        img = self.preprocess(self.mask_values, img, self.scale, is_mask=False, left=left)
+        mask = self.preprocess(self.mask_values, mask, self.scale, is_mask=True, left=left)
 
         return {
             'image': torch.as_tensor(img.copy()).float().contiguous(),
