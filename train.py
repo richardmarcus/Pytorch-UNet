@@ -19,8 +19,8 @@ from unet import UNet
 from utils.data_loading import BasicDataset, CarvanaDataset
 from utils.dice_score import dice_loss
 
-dir_img = Path('/media/oq55olys/chonk/Datasets/kittilike/DurLAR/DurLAR_20210716/ambient/data/')
-dir_mask = Path('/media/oq55olys/chonk/Datasets/kittilike/DurLAR/DurLAR_20210716/reflec/data/')
+#dir_img = Path('/media/oq55olys/chonk/Datasets/kittilike/DurLAR/DurLAR_20210716/ambient/data/')
+#dir_mask = Path('/media/oq55olys/chonk/Datasets/kittilike/DurLAR/DurLAR_20210716/reflec/data/')
 dir_checkpoint = Path('./checkpoints/')
 
 
@@ -182,7 +182,8 @@ def get_args():
     parser.add_argument('--amp', action='store_true', default=False, help='Use mixed precision')
     parser.add_argument('--bilinear', action='store_true', default=False, help='Use bilinear upsampling')
     parser.add_argument('--classes', '-c', type=int, default=2, help='Number of classes')
-
+    parser.add_argument('--img_dir', type=str, default='/media/oq55olys/chonk/Datasets/kittilike/DurLAR/DurLAR_20210716/ambient/data/', help='Image directory')
+    parser.add_argument('--mask_dir', type=str, default='/media/oq55olys/chonk/Datasets/kittilike/DurLAR/DurLAR_20210716/reflec/data/', help='Mask directory')
     return parser.parse_args()
 
 
@@ -192,6 +193,9 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logging.info(f'Using device {device}')
+
+    dir_img = Path(args.img_dir)
+    dir_mask = Path(args.mask_dir)
 
     # Change here to adapt to your data
     # n_channels=3 for RGB images
