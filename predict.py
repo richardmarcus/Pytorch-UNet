@@ -18,7 +18,7 @@ def predict_img(net,
                 scale_factor=1,
                 out_threshold=0.5):
     net.eval()
-    img = torch.from_numpy(BasicDataset.preprocess(None, full_img, scale_factor, is_mask=False))
+    img = torch.from_numpy(BasicDataset.preprocess(None, full_img, scale_factor, is_mask=False, left=0))
     img = img.unsqueeze(0)
     img = img.to(device=device, dtype=torch.float32)
 
@@ -27,6 +27,8 @@ def predict_img(net,
         output = F.interpolate(output, (full_img.size[1], full_img.size[0]), mode='bilinear')
         if net.n_classes > 1:
             mask = output.argmax(dim=1)
+        elif net.n_classes == 0:
+            mask = output
         else:
             mask = torch.sigmoid(output) > out_threshold
 
@@ -48,6 +50,7 @@ def get_args():
                         help='Scale factor for the input images')
     parser.add_argument('--bilinear', action='store_true', default=False, help='Use bilinear upsampling')
     parser.add_argument('--classes', '-c', type=int, default=2, help='Number of classes')
+    parser.add_argument('out_path', metavar='FILE', nargs='?', help='Path to save the predictions')
     
     return parser.parse_args()
 
@@ -60,6 +63,7 @@ def get_output_filenames(args):
 
 
 def mask_to_image(mask: np.ndarray, mask_values):
+
     if isinstance(mask_values[0], list):
         out = np.zeros((mask.shape[-2], mask.shape[-1], len(mask_values[0])), dtype=np.uint8)
     elif mask_values == [0, 1]:
@@ -83,7 +87,14 @@ if __name__ == '__main__':
     in_files = args.input
     out_files = get_output_filenames(args)
 
-    net = UNet(n_channels=3, n_classes=args.classes, bilinear=args.bilinear)
+
+    #if in_files is dir, get all files in dir
+    if os.path.isdir(in_files[0]):
+        out_dir = args.out_path
+        in_files = [os.path.join(in_files[0], f) for f in os.listdir(in_files[0]) if os.path.isfile(os.path.join(in_files[0], f))]
+
+    #hardcored n_channels here...
+    net = UNet(n_channels=1, n_classes=args.classes, bilinear=args.bilinear)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logging.info(f'Loading model {args.model}')
@@ -107,8 +118,10 @@ if __name__ == '__main__':
                            device=device)
 
         if not args.no_save:
-            out_filename = out_files[i]
-            result = mask_to_image(mask, mask_values)
+            #careful does not work for multiclass
+            result = Image.fromarray(mask.astype(np.uint8))
+            #mask_to_image(mask, mask_values)
+            out_filename = os.path.join(out_dir, os.path.basename(filename))
             result.save(out_filename)
             logging.info(f'Mask saved to {out_filename}')
 

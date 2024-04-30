@@ -20,7 +20,13 @@ class UNet(nn.Module):
         self.up2 = (Up(512, 256 // factor, bilinear))
         self.up3 = (Up(256, 128 // factor, bilinear))
         self.up4 = (Up(128, 64, bilinear))
-        self.outc = (OutConv(64, n_classes))
+
+       # self.outc = (OutConv(64, n_classes))
+        #use 1 if n_classes == 0
+        if n_classes == 0:
+            self.outc = (OutConv(64, n_channels))
+        else:
+            self.outc = (OutConv(64, n_classes))
 
     def forward(self, x):
         x1 = self.inc(x)

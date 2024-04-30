@@ -19,8 +19,6 @@ from unet import UNet
 from utils.data_loading import BasicDataset, CarvanaDataset
 from utils.dice_score import dice_loss
 
-#dir_img = Path('/media/oq55olys/chonk/Datasets/kittilike/DurLAR/DurLAR_20210716/ambient/data/')
-#dir_mask = Path('/media/oq55olys/chonk/Datasets/kittilike/DurLAR/DurLAR_20210716/reflec/data/')
 dir_checkpoint = Path('./checkpoints/')
 
 
@@ -44,7 +42,7 @@ def train_model(
     #except (AssertionError, RuntimeError, IndexError):
     #    dataset = BasicDataset(dir_img, dir_mask, img_scale)
 
-    dataset = BasicDataset(dir_img, dir_mask, img_scale)
+    dataset = BasicDataset(dir_img, dir_mask, img_scale, n_classes=model.n_classes)
 
 
     # 2. Split into train / validation partitions
@@ -83,7 +81,7 @@ def train_model(
                               lr=learning_rate, weight_decay=weight_decay, momentum=momentum, foreach=True)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=5)  # goal: maximize Dice score
     grad_scaler = torch.cuda.amp.GradScaler(enabled=amp)
-    criterion = nn.CrossEntropyLoss() if model.n_classes > 1 else nn.BCEWithLogitsLoss()
+    criterion = nn.CrossEntropyLoss() if model.n_classes > 1 else nn.BCEWithLogitsLoss() if model.n_classes == 1 else nn.L1Loss()
     global_step = 0
 
     # 5. Begin training
@@ -100,13 +98,20 @@ def train_model(
                     'the images are loaded correctly.'
 
                 images = images.to(device=device, dtype=torch.float32, memory_format=torch.channels_last)
-                true_masks = true_masks.to(device=device, dtype=torch.long)
+                if model.n_classes > 0:
+                    true_masks = true_masks.to(device=device, dtype=torch.long)
+                else:
+                    true_masks = true_masks.to(device=device, dtype=torch.float32, memory_format=torch.channels_last)
 
                 with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
                     masks_pred = model(images)
                     if model.n_classes == 1:
                         loss = criterion(masks_pred.squeeze(1), true_masks.float())
                         loss += dice_loss(F.sigmoid(masks_pred.squeeze(1)), true_masks.float(), multiclass=False)
+
+                    elif model.n_classes == 0:
+                        loss = criterion(masks_pred, true_masks)
+
                     else:
                         loss = criterion(masks_pred, true_masks)
                         loss += dice_loss(
@@ -132,7 +137,8 @@ def train_model(
                 pbar.set_postfix(**{'loss (batch)': loss.item()})
 
                 # Evaluation round
-                division_step = (n_train // (5 * batch_size))
+                division_step = (16*n_train // (1 * batch_size))
+                print(division_step)
                 if division_step > 0:
                     if global_step % division_step == 0:
                         histograms = {}
@@ -154,7 +160,8 @@ def train_model(
                                 'images': wandb.Image(images[0].cpu()),
                                 'masks': {
                                     'true': wandb.Image(true_masks[0].float().cpu()),
-                                    'pred': wandb.Image(masks_pred.argmax(dim=1)[0].float().cpu()),
+                                    #'pred': wandb.Image(masks_pred.argmax(dim=1)[0].float().cpu()),
+                                    'pred': wandb.Image(masks_pred[0].float().cpu()),
                                 },
                                 'step': global_step,
                                 'epoch': epoch,
@@ -163,12 +170,13 @@ def train_model(
                         except:
                             pass
 
-        if save_checkpoint:
-            Path(dir_checkpoint).mkdir(parents=True, exist_ok=True)
-            state_dict = model.state_dict()
-            state_dict['mask_values'] = dataset.mask_values
-            torch.save(state_dict, str(dir_checkpoint / 'checkpoint_epoch{}.pth'.format(epoch)))
-            logging.info(f'Checkpoint {epoch} saved!')
+                        if save_checkpoint:
+                            Path(dir_checkpoint).mkdir(parents=True, exist_ok=True)
+                            state_dict = model.state_dict()
+                            if model.n_classes > 0:
+                                state_dict['mask_values'] = dataset.mask_values
+                            torch.save(state_dict, str(dir_checkpoint / 'checkpoint_epoch{}.pth'.format(epoch)))
+                            logging.info(f'Checkpoint {epoch} saved!')
 
 
 def get_args():
@@ -184,8 +192,8 @@ def get_args():
     parser.add_argument('--amp', action='store_true', default=False, help='Use mixed precision')
     parser.add_argument('--bilinear', action='store_true', default=False, help='Use bilinear upsampling')
     parser.add_argument('--classes', '-c', type=int, default=2, help='Number of classes')
-    parser.add_argument('--img_dir', type=str, default='/media/oq55olys/chonk/Datasets/kittilike/DurLAR/DurLAR_20210716/ambient/data/', help='Image directory')
-    parser.add_argument('--mask_dir', type=str, default='/media/oq55olys/chonk/Datasets/kittilike/DurLAR/DurLAR_20210716/reflec/data/', help='Mask directory')
+    parser.add_argument('--img_dir', type=str, default='/ambient/data/', help='Image directory')
+    parser.add_argument('--mask_dir', type=str, default='/reflec/data/', help='Mask directory')
     return parser.parse_args()
 
 

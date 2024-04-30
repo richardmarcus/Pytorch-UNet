@@ -18,16 +18,26 @@ def evaluate(net, dataloader, device, amp):
 
             # move images and labels to correct device and type
             image = image.to(device=device, dtype=torch.float32, memory_format=torch.channels_last)
-            mask_true = mask_true.to(device=device, dtype=torch.long)
+            if net.n_classes >0:
+                mask_true = mask_true.to(device=device, dtype=torch.long)
+
+            else:
+                mask_true = mask_true.to(device=device, dtype=torch.float32, memory_format=torch.channels_last)
+
 
             # predict the mask
             mask_pred = net(image)
+
 
             if net.n_classes == 1:
                 assert mask_true.min() >= 0 and mask_true.max() <= 1, 'True mask indices should be in [0, 1]'
                 mask_pred = (F.sigmoid(mask_pred) > 0.5).float()
                 # compute the Dice score
                 dice_score += dice_coeff(mask_pred, mask_true, reduce_batch_first=False)
+            elif net.n_classes == 0:
+                # compute the Dice score
+                #dice_score += dice_coeff(mask_pred, mask_true, reduce_batch_first=False)
+                dice_score += torch.nn.functional.l1_loss(mask_pred, mask_true, reduction='mean')
             else:
                 assert mask_true.min() >= 0 and mask_true.max() < net.n_classes, 'True mask indices should be in [0, n_classes['
                 # convert to one-hot format

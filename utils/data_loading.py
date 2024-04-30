@@ -11,6 +11,7 @@ from os.path import splitext, isfile, join
 from pathlib import Path
 from torch.utils.data import Dataset
 from tqdm import tqdm
+import cv2
 
 
 def load_image(filename):
@@ -21,13 +22,10 @@ def load_image(filename):
         return Image.fromarray(torch.load(filename).numpy())
     else:
         image = Image.open(filename)
-        #convert from 16 bit to 8 bit
-        #divide by 256
+
         image = np.array(image)
         image = image.astype(np.float32)
-        image = image / 256
-        image = image.astype(np.uint8)
-        
+
         return image
 
 
@@ -47,7 +45,7 @@ def unique_mask_values(idx, mask_dir, mask_suffix):
 
 
 class BasicDataset(Dataset):
-    def __init__(self, images_dir: str, mask_dir: str, scale: float = 1.0, mask_suffix: str = ''):
+    def __init__(self, images_dir: str, mask_dir: str, scale: float = 1.0, mask_suffix: str = '', n_classes: int = 0):
         self.images_dir = Path(images_dir)
         self.mask_dir = Path(mask_dir)
         assert 0 < scale <= 1, 'Scale must be between 0 and 1'
@@ -55,28 +53,29 @@ class BasicDataset(Dataset):
         self.mask_suffix = mask_suffix
 
         self.ids = [splitext(file)[0] for file in listdir(images_dir) if isfile(join(images_dir, file)) and not file.startswith('.')]
-        #only take the first 1000 images
-        #self.ids = self.ids[:1000]
+ 
         if not self.ids:
             raise RuntimeError(f'No input file found in {images_dir}, make sure you put your images there')
 
         logging.info(f'Creating dataset with {len(self.ids)} examples')
-        logging.info('Scanning mask files to determine unique values')
-        with Pool() as p:
-            unique = list(tqdm(
-                p.imap(partial(unique_mask_values, mask_dir=self.mask_dir, mask_suffix=self.mask_suffix), self.ids),
-                total=len(self.ids)
-            ))
 
-        self.mask_values = list(sorted(np.unique(np.concatenate(unique), axis=0).tolist()))
-        logging.info(f'Unique mask values: {self.mask_values}')
+        if n_classes > 0:
+            logging.info('Scanning mask files to determine unique values')
+            with Pool() as p:
+                unique = list(tqdm(
+                    p.imap(partial(unique_mask_values, mask_dir=self.mask_dir, mask_suffix=self.mask_suffix), self.ids),
+                    total=len(self.ids)
+                ))
+
+            self.mask_values = list(sorted(np.unique(np.concatenate(unique), axis=0).tolist()))
+            logging.info(f'Unique mask values: {self.mask_values}')
 
     def __len__(self):
         return len(self.ids)
 
     def random_crop_image(img, newW, newH, left):
         top = 0
-        bottom = top + newH
+        bottom = top + newH #-32
         right = left + newW
         return img[top:bottom, left:right]
         
@@ -85,24 +84,20 @@ class BasicDataset(Dataset):
     def preprocess(mask_values, pil_img, scale, is_mask, left):
         #w, h = pil_img.size
 
-        newH, newW = 128, 256
+        #if you had the full scans you could do random cropping
+        newH, newW = 128, 128
 
         img = np.asarray(pil_img)
         img = BasicDataset.random_crop_image(img, newW, newH, left)
+
+        #resize image with cv2
+        img = cv2.resize(img, (newW, newH), interpolation=cv2.INTER_NEAREST if is_mask else cv2.INTER_LINEAR)
+
+
         if is_mask:
+            #original plan was to support binary classification as well but this breaks multi-class
             img[img != 0] = 1
-        pil_img = Image.fromarray(img)
-        
-
-
-        #newW, newH = int(scale * w), int(scale * h)
-        #assert newW > 0 and newH > 0, 'Scale is too small, resized images would have no pixel'
-        #pil_img = pil_img.resize((newW, newH), resample=Image.NEAREST if is_mask else Image.BICUBIC)
-        img = np.asarray(pil_img)
-
         if is_mask:
-            #set mask to 1 if it is not 0
-
             mask = np.zeros((newH, newW), dtype=np.int64)
             for i, v in enumerate(mask_values):
                 if img.ndim == 2:
@@ -136,14 +131,27 @@ class BasicDataset(Dataset):
         assert img.size == mask.size, \
             f'Image and mask {name} should be the same size, but are {img.size} and {mask.size}'
 
-        left = np.random.randint(0, img.shape[1] - 256)
-        img = self.preprocess(self.mask_values, img, self.scale, is_mask=False, left=left)
-        mask = self.preprocess(self.mask_values, mask, self.scale, is_mask=True, left=left)
+        left = 0
+        #TODO: do not hardcode this
+        as_mask = False
+        
+        mask_values = self.mask_values if as_mask else None
 
-        return {
-            'image': torch.as_tensor(img.copy()).float().contiguous(),
-            'mask': torch.as_tensor(mask.copy()).long().contiguous()
-        }
+        img = self.preprocess(mask_values, img, self.scale, is_mask=False, left=left)
+ 
+        mask = self.preprocess(mask_values, mask, self.scale, is_mask=as_mask, left=left)
+
+        if as_mask:
+          
+            return {
+                'image': torch.as_tensor(img.copy()).float().contiguous(),
+                'mask': torch.as_tensor(mask.copy()).long().contiguous()
+            }
+        else:
+            return {
+                'image': torch.as_tensor(img.copy()).float().contiguous(),
+                'mask': torch.as_tensor(mask.copy()).float().contiguous()
+            }
 
 
 class CarvanaDataset(BasicDataset):
